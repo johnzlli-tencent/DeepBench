@@ -125,9 +125,9 @@ class cudnnRNN {
 
     cudnnRNN(int hidden_size, int batch_size, int time_steps, const std::string& rnn_type) :
         dropout_(0.f), time_steps_(time_steps),
-        xDescArray_({batch_size, hidden_size, 1}, {hidden_size, 1, 1}, time_steps),
+        xDescArray_({batch_size, 800, 1}, {800, 1, 1}, time_steps),
         yDescArray_({batch_size, hidden_size, 1}, {hidden_size, 1, 1}, time_steps),
-        dxDescArray_({batch_size, hidden_size, 1}, {hidden_size, 1, 1}, time_steps),
+        dxDescArray_({batch_size, 800, 1}, {800, 1, 1}, time_steps),
         dyDescArray_({batch_size, hidden_size, 1}, {hidden_size, 1, 1}, time_steps),
         hx_desc_({1, batch_size, hidden_size}, {hidden_size * batch_size, hidden_size, 1}),
         hy_desc_({1, batch_size, hidden_size}, {hidden_size * batch_size, hidden_size, 1}),
@@ -143,7 +143,7 @@ class cudnnRNN {
             rnn_desc_ = RNNDescriptor<T>(hidden_size,
                                              1,
                                              dropout_.desc(),
-                                             CUDNN_SKIP_INPUT,
+                                             CUDNN_LINEAR_INPUT,
                                              CUDNN_UNIDIRECTIONAL,
                                              rnn_type,
                                              cudnn_handle);
@@ -274,7 +274,7 @@ std::tuple<int, int, int> time_rnn(int hidden_size,
 
     cudnnRNN<T> rnn(hidden_size, batch_size, time_steps, type);
 
-    auto x  = rand<T>({hidden_size, batch_size * time_steps}, curand_gen);
+    auto x  = rand<T>({800, batch_size * time_steps}, curand_gen);
     auto y  = rand<T>({hidden_size, batch_size * time_steps}, curand_gen);
     auto dx = rand<T>({hidden_size, batch_size * time_steps}, curand_gen);
     auto dy = rand<T>({hidden_size, batch_size * time_steps}, curand_gen);
@@ -291,7 +291,8 @@ std::tuple<int, int, int> time_rnn(int hidden_size,
     int numRepeats = 100;
 
     //Warm up
-    rnn.forward(x, hx, cx, y, hy, cy);
+    for (int i = 0; i < 50; i++)
+        rnn.forward(x, hx, cx, y, hy, cy);
 
     cudaDeviceSynchronize();
 
@@ -299,52 +300,14 @@ std::tuple<int, int, int> time_rnn(int hidden_size,
 
     for (int i = 0; i < numRepeats; ++i) {
         rnn.forward(x, hx, cx, y, hy, cy);
+        cudaDeviceSynchronize();
     }
-    cudaDeviceSynchronize();
 
     auto end = std::chrono::steady_clock::now();
 
     auto forward_time = std::chrono::duration<double, std::micro>(end - start).count() / numRepeats;
     int bwd_data_time = 0;
     int bwd_params_time = 0;
-
-    if (!inference) {
-        //Warm up
-        rnn.backward_data(y, dy, dhy, dcy,
-                          hx, cx, dx, dhx, dcx);
-
-        cudaDeviceSynchronize();
-
-        start = std::chrono::steady_clock::now();
-
-        for (int i = 0; i < numRepeats; ++i) {
-            rnn.backward_data(y, dy, dhy, dcy,
-                              hx, cx, dx, dhx, dcx);
-        }
-        cudaDeviceSynchronize();
-
-        end = std::chrono::steady_clock::now();
-        bwd_data_time = std::chrono::duration<double, std::micro>(end - start).count() / numRepeats;
-
-        /* Backward wrt params */
-        //Warm up
-        rnn.backward_params(x, hx, y);
-
-        cudaDeviceSynchronize();
-
-        start = std::chrono::steady_clock::now();
-
-        for (int i = 0; i < numRepeats; ++i) {
-            rnn.backward_params(x, hx, y);
-        }
-
-        cudaDeviceSynchronize();
-
-        end = std::chrono::steady_clock::now();
-        bwd_params_time = std::chrono::duration<double, std::micro>(end - start).count() / numRepeats;
-
-
-    }
 
     return std::make_tuple(static_cast<int>(forward_time),
                            static_cast<int>(bwd_data_time),
@@ -396,11 +359,13 @@ int main(int argc, char **argv) {
     }
 
     std::cout << std::endl;
-    for (const auto &problem : (inference ? inference_server_set : training_set)) {
+    {
         int hidden_state, batch_size, time_steps;
         std::string type;
-        std::tie(hidden_state, batch_size, time_steps, type) = problem;
-
+        hidden_state = 1024;
+        batch_size = 5000;
+        time_steps = 50;
+        type = "lstm";
         std::cout << std::setw(8) << type;
         std::cout << std::setw(8) << hidden_state;
         std::cout << std::setw(8) << batch_size;
