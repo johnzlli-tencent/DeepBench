@@ -19,7 +19,7 @@ USE_TENSOR_CORES?=0
 COMMA=,
 NVCC_ARCH_ARGS=$(foreach a,$(subst $(COMMA), ,$(ARCH)),--generate-code arch=$(patsubst sm_%,compute_%,$(a)),code=$(a))
 
-.PHONY=all gemm conv rnn 
+.PHONY=all gemm conv rnn clean
 
 all: gemm conv rnn 
 
